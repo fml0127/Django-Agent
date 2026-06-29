@@ -8,6 +8,12 @@ from personal_knowledge_base import views
 
 urlpatterns = [
     path("health", views.health),
+    path("api/v1/", include("accounts.urls")),
+    path("api/v1/", include("knowledge.urls")),
+    path("api/v1/", include("chat.urls")),
+    path("api/v1/", include("wiki.urls")),
+    path("api/v1/", include("agent.urls")),
+    path("api/v1/", include("models_config.urls")),
     path("api/v1/", include("personal_knowledge_base.urls")),
     path("files", views.serve_file),
     path("api/v1/files/presigned", views.presigned_file),

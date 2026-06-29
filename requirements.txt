@@ -1,7 +1,25 @@
+# Django 核心
 Django==5.2.15
 djangorestframework==3.14.0
+
+# 数据库
 sqlite-vec==0.1.9
+
+# HTTP 客户端
 requests>=2.32.0
+
+# 文档处理
 pypdf>=5.0.0
 python-docx>=1.1.0
+
+# Neo4j 图数据库
 neo4j>=5.28.0
+
+# 生产部署
+gunicorn>=22.0.0
+
+# CORS 支持
+django-cors-headers>=4.4.0
+
+# 环境变量管理
+python-dotenv>=1.0.0

@@ -1,4 +1,5 @@
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -29,9 +30,22 @@ def env_bool(name, default=False):
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
-SECRET_KEY = "personal-knowledge-base-dev-secret"
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+# ── 安全配置 ─────────────────────────────────────────────────────
+# SECRET_KEY: 生产环境必须从环境变量读取
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    if env_bool("DJANGO_DEBUG", True):
+        # 开发环境使用临时密钥
+        SECRET_KEY = "dev-" + secrets.token_urlsafe(32)
+    else:
+        raise ValueError("DJANGO_SECRET_KEY environment variable is required in production")
+
+# DEBUG: 生产环境必须设为 False
+DEBUG = env_bool("DJANGO_DEBUG", True)
+
+# ALLOWED_HOSTS: 生产环境必须限制
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+
 APP_NAME = os.environ.get("APP_NAME", "个人轻量知识库")
 
 INSTALLED_APPS = [
@@ -40,11 +54,19 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.staticfiles",
     "rest_framework",
+    "corsheaders",
+    "accounts",
+    "knowledge",
+    "chat",
+    "wiki",
+    "agent",
+    "models_config",
     "personal_knowledge_base",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -144,3 +166,36 @@ WEKNORA_USE_BAILIAN_VLM = env_bool("WEKNORA_USE_BAILIAN_VLM", True)
 WEKNORA_USE_BAILIAN_ASR = env_bool("WEKNORA_USE_BAILIAN_ASR", True)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 256 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 256 * 1024 * 1024
+
+# ── CORS 配置 ─────────────────────────────────────────────────────
+CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+CORS_ALLOW_CREDENTIALS = True
+
+# ── 日志配置 ─────────────────────────────────────────────────────
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}

@@ -120,15 +120,26 @@ class ToolRegistry:
             )
 
 
+# ── 已见内容跟踪（会话级去重，参考 WeKnora 的 seenChunks）────────────
+_seen_chunks: set[str] = set()
+_seen_wiki_slugs: set[str] = set()
+
+
+def clear_seen_cache():
+    """清除已见内容缓存（每次 Agent 执行开始时调用）。"""
+    _seen_chunks.clear()
+    _seen_wiki_slugs.clear()
+
+
 # ── 内置工具实现 ─────────────────────────────────────────────────────
 class KnowledgeSearchTool(Tool):
-    """知识库检索工具。"""
+    """知识库检索工具（带会话级去重）。"""
 
     def name(self) -> str:
         return "knowledge_search"
 
     def description(self) -> str:
-        return "Search the knowledge base for relevant documents. Returns document chunks with titles and relevance scores."
+        return "Search the knowledge base for relevant documents. Returns document chunks with titles and relevance scores. Duplicate chunks from previous calls are marked as already seen."
 
     def parameters(self) -> dict:
         return {
@@ -155,13 +166,19 @@ class KnowledgeSearchTool(Tool):
         if not refs:
             return ToolResult(output="No relevant documents found.", data=[])
 
-        # 格式化输出
+        # 格式化输出（带去重标记，参考 WeKnora 的 seenChunks）
         lines = []
         for i, r in enumerate(refs, 1):
+            chunk_id = r.get("chunk_id", "")
             title = r.get("knowledge_title", "Unknown")
             content = r.get("content", "")[:500]
             score = r.get("score", 0)
-            lines.append(f"[{i}] {title} (score: {score:.2f})\n{content}")
+
+            if chunk_id in _seen_chunks:
+                lines.append(f"[{i}] {title} (score: {score:.2f})\n<note>(content omitted, already returned in a previous knowledge_search call this session)</note>")
+            else:
+                _seen_chunks.add(chunk_id)
+                lines.append(f"[{i}] {title} (score: {score:.2f})\n{content}")
 
         output = "\n\n".join(lines)
         return ToolResult(output=output, data=refs)
@@ -539,22 +556,22 @@ class ReadSkillTool(Tool):
         return ToolResult(output=skill.instructions or f"Skill '{skill_name}' has no instructions.")
 
 
-# ── Wiki 工具 ────────────────────────────────────────────────────────
+# ── Wiki 工具（带会话级去重，参考 WeKnora 的 seenSlugs）─────────────
 class WikiSearchTool(Tool):
-    """搜索 Wiki 页面。"""
+    """搜索 Wiki 页面（带去重）。"""
 
     def name(self) -> str:
         return "wiki_search"
 
     def description(self) -> str:
-        return "Search wiki pages by keyword. Returns matching wiki page titles, slugs, and summaries. Use this to find relevant wiki pages."
+        return "Search wiki pages by keyword. Returns matching wiki page titles, slugs, and summaries. Duplicate pages from previous calls are marked as already seen."
 
     def parameters(self) -> dict:
         return {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search keywords"},
-                "limit": {"type": "integer", "description": "Max results (default 10)", "default": 10},
+                "limit": {"type": "integer", "description": "Max results (default 5)", "default": 5},
             },
             "required": ["query"],
         }
@@ -563,7 +580,7 @@ class WikiSearchTool(Tool):
         from .models import WikiPage
 
         query = args.get("query", "")
-        limit = args.get("limit", 10)
+        limit = args.get("limit", 5)
         tenant_id = context.get("tenant_id")
         kb_ids = context.get("kb_ids", [])
 
@@ -589,8 +606,14 @@ class WikiSearchTool(Tool):
 
         lines = []
         for p in pages:
-            summary = (p.description or p.content or "")[:150]
-            lines.append(f"[{p.slug}] {p.title}\n  {summary}")
+            slug = p.slug
+            # 去重标记（参考 WeKnora 的 seenSlugs）
+            if slug in _seen_wiki_slugs:
+                lines.append(f"[{slug}] {p.title}\n  <note>(summary omitted, already seen in previous search)</note>")
+            else:
+                _seen_wiki_slugs.add(slug)
+                summary = (p.summary or p.content or "")[:300]
+                lines.append(f"[{slug}] {p.title}\n  {summary}")
 
         return ToolResult(output="\n\n".join(lines))
 
@@ -768,12 +791,20 @@ def get_tool_registry() -> ToolRegistry:
 
 
 DEFAULT_ALLOWED_TOOLS = [
-    "thinking",
-    "todo_write",
+    # Wiki 工具（优先使用）
+    "wiki_search",
+    "wiki_read_page",
+    "wiki_list_pages",
+    "wiki_read_source_doc",
+    # 知识库工具
     "knowledge_search",
     "grep_chunks",
     "list_knowledge_docs",
     "get_document_info",
+    # 推理工具
+    "thinking",
+    "todo_write",
+    # 外部工具
     "database_query",
     "web_search",
     "web_fetch",

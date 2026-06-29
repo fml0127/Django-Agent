@@ -342,7 +342,9 @@ def auth_register(request):
     data = parse_body(request)
     username = data.get("username") or data.get("email", "").split("@")[0] or f"user-{secrets.token_hex(3)}"
     email = data.get("email") or f"{username}@local"
-    password = data.get("password") or "knowledge"
+    password = data.get("password")
+    if not password:
+        return fail("password is required", 400)
     if User.objects.filter(Q(username=username) | Q(email=email)).exists():
         return fail("user already exists", 409, "user_exists")
     tenant = Tenant.objects.create(name=f"{username} 的空间", api_key=secrets.token_urlsafe(24), business="default")
@@ -357,8 +359,21 @@ def auth_register(request):
 def auth_auto_setup(request):
     user = User.objects.order_by("created_at").first()
     if not user:
-        request._body = json.dumps({"username": "admin", "email": "admin@knowledge.local", "password": "admin123456"}).encode()
-        return auth_register(request)
+        # 生成随机密码，首次登录后必须修改
+        random_password = secrets.token_urlsafe(12)
+        request._body = json.dumps({"username": "admin", "email": "admin@knowledge.local", "password": random_password}).encode()
+        response = auth_register(request)
+        # 在响应中添加临时密码提示
+        if hasattr(response, 'content'):
+            try:
+                data = json.loads(response.content)
+                if 'data' in data:
+                    data['data']['temp_password'] = random_password
+                    data['data']['require_password_change'] = True
+                    response.content = json.dumps(data).encode()
+            except Exception:
+                pass
+        return response
     if user.email == "admin@weknora.local" and not User.objects.filter(email="admin@knowledge.local").exists():
         user.email = "admin@knowledge.local"
         user.save(update_fields=["email", "updated_at"])
