@@ -72,3 +72,11 @@ coverage.xml
 *.cache
 .mypy_cache/
 .ruff_cache/
+
+# ── Claude Code ───────────────────────────────────────────────────
+.claude/
+.agents/
+skills-lock.json
+
+# ── Other Projects ────────────────────────────────────────────────
+xiaolinnote_ai/
