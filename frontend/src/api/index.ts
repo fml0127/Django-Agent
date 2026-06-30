@@ -215,4 +215,11 @@ export const api = {
   createWikiPage: (kbId: string, data: any) => client.post(`/api/v1/knowledge-bases/${kbId}/wiki/pages`, data),
   wikiSearch: (kbId: string, params: any = {}) => client.get(`/api/v1/knowledge-bases/${kbId}/wiki/search`, { params }),
   wikiGraph: (kbId: string, params: any = {}) => client.get(`/api/v1/knowledge-bases/${kbId}/wiki/graph`, { params }),
+
+  // RAG 评估
+  ragEvalRun: (data: any = {}) => client.post('/api/v1/rag-eval/run', data),
+  ragEvalQuestions: () => client.get('/api/v1/rag-eval/questions'),
+  ragEvalAddQuestion: (data: any) => client.post('/api/v1/rag-eval/questions', data),
+  ragEvalGenerate: (data: any = {}) => client.post('/api/v1/rag-eval/generate', data),
+  ragEvalHistory: () => client.get('/api/v1/rag-eval/history'),
 }

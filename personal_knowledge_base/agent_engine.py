@@ -9,7 +9,7 @@ Agent ReAct 引擎
 3. 如果 LLM 返回 tool_calls → 执行工具（支持并行） → 结果追加到上下文 → 继续循环
 4. 如果 LLM 返回纯文本 → 作为最终回答
 5. 达到 max_iterations 或卡死检测 → 强制结束
-6. 上下文窗口管理：token 估算 + 历史压缩
+6. 上下文窗口管理：Consolidator（LLM 摘要）+ CompressContext（滑动窗口）
 """
 
 import json
@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from .agent_tools import DEFAULT_ALLOWED_TOOLS, ToolResult, ToolRegistry, get_tool_registry
+from .context_manager import estimate_tokens, estimate_messages_tokens, manage_context_window, sort_tools_for_cache
 
 logger = logging.getLogger(__name__)
 
@@ -27,65 +28,6 @@ MAX_REPEATED_RESPONSES = 2
 MAX_CONTEXT_TOKENS = 120000  # 约 120K tokens 上限
 MAX_TOOL_OUTPUT = 16 * 1024
 PARALLEL_TOOL_WORKERS = 4
-
-
-# ── Token 估算 ───────────────────────────────────────────────────────
-def estimate_tokens(text: str) -> int:
-    """简易 token 估算：中文约 1.5 字/token，英文约 4 字符/token。"""
-    if not text:
-        return 0
-    chinese_chars = len(re.findall(r'[一-鿿]', text))
-    other_chars = len(text) - chinese_chars
-    return int(chinese_chars / 1.5 + other_chars / 4)
-
-
-def estimate_messages_tokens(messages: list[dict]) -> int:
-    """估算消息列表的 token 数。"""
-    total = 0
-    for msg in messages:
-        total += 4  # role 开销
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            total += estimate_tokens(content)
-        # tool_calls 也计入
-        for tc in msg.get("tool_calls", []):
-            total += estimate_tokens(json.dumps(tc, ensure_ascii=False))
-    return total
-
-
-# ── 上下文压缩 ───────────────────────────────────────────────────────
-def compress_context(messages: list[dict], max_tokens: int = MAX_CONTEXT_TOKENS) -> list[dict]:
-    """
-    压缩消息列表以适应上下文窗口。
-    策略：保留 system prompt + 最近的消息，删除最早的工具消息组。
-    """
-    current_tokens = estimate_messages_tokens(messages)
-    if current_tokens <= max_tokens:
-        return messages
-
-    # 始终保留：system prompt（第 1 条）+ 最后 2 条（当前轮）
-    system = messages[0] if messages and messages[0].get("role") == "system" else None
-    tail = messages[-2:] if len(messages) > 2 else messages[1:]
-    middle = messages[1:-2] if len(messages) > 2 else []
-
-    # 从中间部分的前面开始删除（每组：assistant + tool 结果）
-    while current_tokens > max_tokens and len(middle) > 2:
-        # 删除最前面的一组（assistant + tool messages）
-        removed_tokens = 0
-        removed_count = 0
-        while middle and removed_count < 2:
-            removed_msg = middle.pop(0)
-            removed_tokens += estimate_tokens(json.dumps(removed_msg, ensure_ascii=False))
-            removed_count += 1
-        current_tokens -= removed_tokens
-
-    # 重新组装
-    result = []
-    if system:
-        result.append(system)
-    result.extend(middle)
-    result.extend(tail)
-    return result
 
 
 # ── 数据结构 ─────────────────────────────────────────────────────────
@@ -137,10 +79,10 @@ class AgentResult:
 
 
 # ── 系统 Prompt 模板 ─────────────────────────────────────────────────
-SYSTEM_PROMPT_WITH_TOOLS = """你是一个知识库问答助手，能够使用工具来帮助回答问题。
+# 设计原则：共享不可变前缀，兼容 DeepSeek V4 自动前缀缓存
+# 静态前缀（所有 Agent 共享，可缓存）+ 动态上下文（每个会话不同）
 
-## 可用工具
-{tools_desc}
+SYSTEM_PROMPT_STATIC_PREFIX = """你是一个知识库问答助手，能够使用工具来帮助回答问题。
 
 ## 回答策略
 
@@ -166,11 +108,16 @@ Wiki 页面是预合成的结构化知识，包含文档之间的关系、对比
 - **有引用**：引用具体文档标题和 Wiki 页面
 - **有综合**：将多个来源的信息整合成连贯的分析
 
-## 效率原则（参考 WeKnora）
+## 效率原则
 - **并行调用**：多个独立的工具调用可以同时执行
 - **正则合并**：grep_chunks 中用 `|` 合并多个关键词，不要分开调用
 - **深度阅读**：搜索到结果后，必须读取完整内容再回答，不要仅凭摘要
-- **见好就收**：如果已有足够信息，直接回答，不要再搜索
+- **见好就收**：如果已有足够信息，直接回答，不要再搜索"""
+
+SYSTEM_PROMPT_WITH_TOOLS = SYSTEM_PROMPT_STATIC_PREFIX + """
+
+## 可用工具
+{tools_desc}
 
 {custom_prompt}"""
 
@@ -231,9 +178,10 @@ class AgentEngine:
         """
         调用 LLM，支持重试。
         参考 WeKnora 的 callLLMWithRetry：对瞬态错误（timeout、rate limit、server error）进行重试。
+        工具定义按字母排序，确保字节级稳定性（兼容 DeepSeek V4 自动前缀缓存）。
         """
         from .model_providers import chat_completion_raw
-        tools = self.registry.to_openai_tools(self.allowed_tools)
+        tools = sort_tools_for_cache(self.registry.to_openai_tools(self.allowed_tools))
 
         last_error = None
         for attempt in range(max_retries):
@@ -321,8 +269,16 @@ class AgentEngine:
             for iteration in range(1, self.max_iterations + 1):
                 step = AgentStep(iteration=iteration, timestamp=time.time())
 
-                # 上下文窗口管理
-                messages = compress_context(messages, MAX_CONTEXT_TOKENS)
+                # 上下文窗口管理（参考 WeKnora 的 manageContextWindow）
+                # 1. 脱敏历史 KB 结果
+                # 2. Consolidator（LLM 摘要压缩，token > 50% 时触发）
+                # 3. 滑动窗口截断（token > 80% 时触发）
+                messages = manage_context_window(
+                    messages,
+                    max_tokens=MAX_CONTEXT_TOKENS,
+                    llm_caller=self._call_llm_simple if iteration > 1 else None,
+                    enable_redact=True,
+                )
 
                 try:
                     # 每轮 LLM 调用追踪

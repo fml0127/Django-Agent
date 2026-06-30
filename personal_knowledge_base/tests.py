@@ -14,7 +14,7 @@ from .models import Chunk, Knowledge, KnowledgeBase, ModelConfig, ModelUsage, Te
 
 
 @override_settings(
-    DASHSCOPE_API_KEY="",
+    LLM_CHAT_API_KEY="",
     WEKNORA_USE_BAILIAN_CHAT=False,
     WEKNORA_USE_BAILIAN_SUMMARY=False,
     WEKNORA_USE_BAILIAN_TITLE=False,
@@ -214,8 +214,8 @@ class PersonalKnowledgeBaseCoreFlowTests(TestCase):
         self.assertEqual(data["name"], settings.APP_NAME)
         self.assertIn("roles", data["bailian"])
         body = json.dumps(data, ensure_ascii=False)
-        if settings.DASHSCOPE_API_KEY:
-            self.assertNotIn(settings.DASHSCOPE_API_KEY, body)
+        if settings.LLM_CHAT_API_KEY:
+            self.assertNotIn(settings.LLM_CHAT_API_KEY, body)
         self.assertEqual(data["bailian"]["local_embedding_dimension"], 384)
         self.assertFalse(data["bailian"]["roles"]["embedding"]["enabled"])
 

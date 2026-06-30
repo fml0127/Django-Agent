@@ -23,3 +23,11 @@ django-cors-headers>=4.4.0
 
 # 环境变量管理
 python-dotenv>=1.0.0
+
+# Token 估算（BPE 编码）
+tiktoken>=0.7.0
+
+# RAG 评估
+ragas>=0.1.0
+datasets>=2.14.0
+langchain-openai>=0.1.0

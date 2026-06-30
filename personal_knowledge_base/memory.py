@@ -333,11 +333,11 @@ def _chat_completion_raw(tenant, messages: list[dict], model_id: str = "", respo
     )
     from django.conf import settings as dj_settings
 
-    # 环境变量配置的 Bailian 模型
-    if (not model_id or is_env_chat_model_id(model_id)) and dj_settings.WEKNORA_USE_BAILIAN_CHAT and dj_settings.DASHSCOPE_API_KEY:
-        base_url = dj_settings.ALIYUN_BAILIAN_BASE_URL
-        api_key = dj_settings.DASHSCOPE_API_KEY
-        model_name = dj_settings.ALIYUN_BAILIAN_CHAT_MODEL
+    # 环境变量配置的模型（优先使用新变量名，向后兼容旧变量名）
+    if (not model_id or is_env_chat_model_id(model_id)) and dj_settings.WEKNORA_USE_BAILIAN_CHAT and dj_settings.LLM_CHAT_API_KEY:
+        base_url = dj_settings.LLM_CHAT_BASE_URL
+        api_key = dj_settings.LLM_CHAT_API_KEY
+        model_name = dj_settings.LLM_EXTRACT_MODEL or dj_settings.LLM_CHAT_MODEL
     else:
         if is_env_chat_model_id(model_id):
             raise ModelConfigurationError("Bailian chat model is not configured")

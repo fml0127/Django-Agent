@@ -13,29 +13,45 @@ import {
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const nav = [
+const mainNav = [
   { path: '/platform/knowledge-bases', label: '知识库', icon: DataBaseIcon },
   { path: '/platform/creatChat', label: '对话', icon: ChatIcon },
   { path: '/platform/agents', label: 'Agent', icon: LogoGithubIcon },
+]
+const bottomNav = [
   { path: '/platform/settings', label: '设置', icon: SettingIcon },
 ]
-const title = computed(() => nav.find((n) => route.path.startsWith(n.path))?.label || '知识库')
+const title = computed(() => [...mainNav, ...bottomNav].find((n) => route.path.startsWith(n.path))?.label || '知识库')
 </script>
 
 <template>
   <div class="shell">
     <aside class="sidebar">
       <div class="logo"><BookOpenIcon /><span>个人轻量知识库</span></div>
-      <button
-        v-for="item in nav"
-        :key="item.path"
-        class="nav-item"
-        :class="{ active: route.path.startsWith(item.path) }"
-        @click="router.push(item.path)"
-      >
-        <component :is="item.icon" />
-        <span>{{ item.label }}</span>
-      </button>
+      <nav class="nav-main">
+        <button
+          v-for="item in mainNav"
+          :key="item.path"
+          class="nav-item"
+          :class="{ active: route.path.startsWith(item.path) }"
+          @click="router.push(item.path)"
+        >
+          <component :is="item.icon" />
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
+      <nav class="nav-bottom">
+        <button
+          v-for="item in bottomNav"
+          :key="item.path"
+          class="nav-item"
+          :class="{ active: route.path.startsWith(item.path) }"
+          @click="router.push(item.path)"
+        >
+          <component :is="item.icon" />
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
     </aside>
     <section class="workspace">
       <header class="topbar">

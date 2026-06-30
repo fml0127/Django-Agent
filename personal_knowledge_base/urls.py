@@ -1,6 +1,6 @@
 from django.urls import path, re_path
 
-from . import views
+from . import eval_views, views
 
 
 urlpatterns = [
@@ -146,4 +146,10 @@ urlpatterns = [
     path("embed/<str:channel_id>/messages/<str:session_id>/load", views.embed_public, {"action": "messages"}),
     path("embed/<str:channel_id>/sessions/<str:session_id>/stop", views.embed_public, {"action": "stop"}),
     path("embed/<str:channel_id>/sessions/<str:session_id>/events", views.embed_public, {"action": "events"}),
+
+    # ── RAG Evaluation ────────────────────────────────────────────────────────
+    path("rag-eval/run", eval_views.rag_eval_run),
+    path("rag-eval/questions", eval_views.rag_eval_questions),
+    path("rag-eval/generate", eval_views.rag_eval_generate),
+    path("rag-eval/history", eval_views.rag_eval_history),
 ]

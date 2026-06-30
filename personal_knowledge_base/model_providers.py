@@ -27,70 +27,94 @@ TEXT_ROLE_TYPES = {
     "extract": "chat",
 }
 
+def _get_model_config(model_type: str) -> tuple[str, str, str]:
+    """获取指定模型类型的 (base_url, api_key, model_name)。"""
+    model_type = model_type.upper()
+    base_url = getattr(settings, f"LLM_{model_type}_BASE_URL", None) or settings.LLM_CHAT_BASE_URL
+    api_key = getattr(settings, f"LLM_{model_type}_API_KEY", None) or settings.LLM_CHAT_API_KEY
+    model_name = getattr(settings, f"LLM_{model_type}_MODEL", None) or settings.LLM_CHAT_MODEL
+    return base_url, api_key, model_name
+
+
 def _role_config(role: str) -> dict:
     role = role.lower()
-    base = settings.ALIYUN_BAILIAN_BASE_URL
-    configured = bool(settings.DASHSCOPE_API_KEY)
+
+    # 获取该角色对应的模型配置
+    role_to_type = {
+        "chat": "CHAT",
+        "summary": "CHAT",
+        "title": "CHAT",
+        "question": "CHAT",
+        "extract": "CHAT",
+        "embedding": "EMBEDDING",
+        "rerank": "RERANK",
+        "vlm": "VLM",
+        "asr": "ASR",
+    }
+    model_type = role_to_type.get(role, "CHAT")
+    base, api_key, model_name = _get_model_config(model_type)
+    configured = bool(api_key)
+
     configs = {
         "chat": {
             "type": "KnowledgeQA",
-            "model": settings.ALIYUN_BAILIAN_CHAT_MODEL,
+            "model": settings.LLM_CHAT_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_CHAT,
             "description": "知识库问答与 Agent 对话",
         },
         "summary": {
             "type": "KnowledgeQA",
-            "model": settings.ALIYUN_BAILIAN_SUMMARY_MODEL,
+            "model": settings.LLM_SUMMARY_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_SUMMARY,
             "description": "知识条目摘要生成",
         },
         "title": {
             "type": "KnowledgeQA",
-            "model": settings.ALIYUN_BAILIAN_TITLE_MODEL,
+            "model": settings.LLM_TITLE_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_TITLE,
             "description": "会话标题生成",
         },
         "question": {
             "type": "KnowledgeQA",
-            "model": settings.ALIYUN_BAILIAN_QUESTION_MODEL,
+            "model": settings.LLM_QUESTION_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_QUESTION,
             "description": "推荐问题生成",
         },
         "extract": {
             "type": "KnowledgeQA",
-            "model": settings.ALIYUN_BAILIAN_EXTRACT_MODEL,
+            "model": settings.LLM_EXTRACT_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_EXTRACT,
             "description": "Wiki 与结构化信息抽取",
         },
         "embedding": {
             "type": "Embedding",
-            "model": settings.ALIYUN_BAILIAN_EMBEDDING_MODEL,
+            "model": settings.LLM_EMBEDDING_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_EMBEDDING,
-            "dimension": settings.ALIYUN_BAILIAN_EMBEDDING_DIM,
+            "dimension": settings.LLM_EMBEDDING_DIM,
             "description": "知识切片向量化",
         },
         "rerank": {
             "type": "Rerank",
-            "model": settings.ALIYUN_BAILIAN_RERANK_MODEL,
+            "model": settings.LLM_RERANK_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_RERANK,
             "description": "混合检索候选重排序",
         },
         "vlm": {
             "type": "VLLM",
-            "model": settings.ALIYUN_BAILIAN_VLM_MODEL,
+            "model": settings.LLM_VLM_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_VLM,
             "description": "图片内容识别与描述",
         },
         "asr": {
             "type": "ASR",
-            "model": settings.ALIYUN_BAILIAN_ASR_MODEL,
+            "model": settings.LLM_ASR_MODEL,
             "enabled": settings.WEKNORA_USE_BAILIAN_ASR,
             "description": "音频与视频转写",
-            "asr_url": settings.ALIYUN_BAILIAN_ASR_URL,
+            "asr_url": settings.LLM_ASR_URL,
         },
     }
     cfg = configs[role]
-    cfg.update({"role": role, "base_url": base, "configured": configured, "api_key_configured": configured})
+    cfg.update({"role": role, "base_url": base, "configured": configured, "api_key": api_key, "api_key_configured": configured})
     return cfg
 
 
@@ -98,11 +122,11 @@ def bailian_status():
     roles = {role: _role_config(role) for role in ["chat", "summary", "title", "question", "extract", "embedding", "rerank", "vlm", "asr"]}
     return {
         "enabled": roles["chat"]["enabled"],
-        "configured": bool(settings.DASHSCOPE_API_KEY),
-        "base_url": settings.ALIYUN_BAILIAN_BASE_URL,
-        "chat_model": settings.ALIYUN_BAILIAN_CHAT_MODEL,
-        "api_key_configured": bool(settings.DASHSCOPE_API_KEY),
-        "embedding_dimension": settings.ALIYUN_BAILIAN_EMBEDDING_DIM,
+        "configured": bool(settings.LLM_CHAT_API_KEY),
+        "base_url": settings.LLM_CHAT_BASE_URL,
+        "chat_model": settings.LLM_CHAT_MODEL,
+        "api_key_configured": bool(settings.LLM_CHAT_API_KEY),
+        "embedding_dimension": settings.LLM_EMBEDDING_DIM,
         "local_embedding_dimension": settings.WEKNORA_EMBEDDING_DIM,
         "roles": roles,
     }
@@ -181,7 +205,7 @@ def _env_text_completion(role: str, messages: list[dict], tenant: Tenant | None 
         raise ModelConfigurationError(f"Bailian {role} model is not configured")
     started = time.monotonic()
     try:
-        data = openai_compatible_chat_raw(cfg["base_url"], settings.DASHSCOPE_API_KEY, cfg["model"], messages)
+        data = openai_compatible_chat_raw(cfg["base_url"], settings.LLM_CHAT_API_KEY, cfg["model"], messages)
         usage = usage_from_response(data)
         if not usage["total_tokens"]:
             usage["prompt_tokens"] = estimate_tokens(messages)
@@ -215,7 +239,7 @@ def _env_text_completion(role: str, messages: list[dict], tenant: Tenant | None 
 
 
 def chat_completion(tenant: Tenant, messages: list[dict], model_id: str = "", stream: bool = False) -> str:
-    if (not model_id or is_env_chat_model_id(model_id)) and settings.WEKNORA_USE_BAILIAN_CHAT and settings.DASHSCOPE_API_KEY:
+    if (not model_id or is_env_chat_model_id(model_id)) and settings.WEKNORA_USE_BAILIAN_CHAT and settings.LLM_CHAT_API_KEY:
         return _env_text_completion("chat", messages, tenant, "chat")
     if is_env_chat_model_id(model_id):
         raise ModelConfigurationError("Bailian chat model is not configured")
@@ -277,10 +301,10 @@ def chat_completion_stream(
         for token in chat_completion_stream(tenant, messages):
             yield token
     """
-    if (not model_id or is_env_chat_model_id(model_id)) and settings.WEKNORA_USE_BAILIAN_CHAT and settings.DASHSCOPE_API_KEY:
-        base_url = settings.ALIYUN_BAILIAN_BASE_URL
-        api_key = settings.DASHSCOPE_API_KEY
-        model_name = settings.ALIYUN_BAILIAN_CHAT_MODEL
+    if (not model_id or is_env_chat_model_id(model_id)) and settings.WEKNORA_USE_BAILIAN_CHAT and settings.LLM_CHAT_API_KEY:
+        base_url = settings.LLM_CHAT_BASE_URL
+        api_key = settings.LLM_CHAT_API_KEY
+        model_name = settings.LLM_CHAT_MODEL
     elif is_env_chat_model_id(model_id):
         raise ModelConfigurationError("Bailian chat model is not configured")
     else:
@@ -349,10 +373,10 @@ def chat_completion_raw(
     支持 function calling 的 LLM 调用。
     返回 {"content": str, "tool_calls": list | None}
     """
-    if (not model_id or is_env_chat_model_id(model_id)) and settings.WEKNORA_USE_BAILIAN_CHAT and settings.DASHSCOPE_API_KEY:
-        base_url = settings.ALIYUN_BAILIAN_BASE_URL
-        api_key = settings.DASHSCOPE_API_KEY
-        model_name = settings.ALIYUN_BAILIAN_CHAT_MODEL
+    if (not model_id or is_env_chat_model_id(model_id)) and settings.WEKNORA_USE_BAILIAN_CHAT and settings.LLM_CHAT_API_KEY:
+        base_url = settings.LLM_CHAT_BASE_URL
+        api_key = settings.LLM_CHAT_API_KEY
+        model_name = settings.LLM_CHAT_MODEL
     elif is_env_chat_model_id(model_id):
         raise ModelConfigurationError("Bailian chat model is not configured")
     else:
@@ -466,20 +490,20 @@ def embedding(tenant: Tenant, texts: Iterable[str], model_id: str = "") -> list[
     values = list(texts)
     if not values:
         return []
-    if not model_id and settings.WEKNORA_USE_BAILIAN_EMBEDDING and settings.DASHSCOPE_API_KEY:
+    if not model_id and settings.WEKNORA_USE_BAILIAN_EMBEDDING and settings.LLM_CHAT_API_KEY:
         started = time.monotonic()
         try:
             vectors = openai_compatible_embedding(
-                settings.ALIYUN_BAILIAN_BASE_URL,
-                settings.DASHSCOPE_API_KEY,
-                settings.ALIYUN_BAILIAN_EMBEDDING_MODEL,
+                settings.LLM_CHAT_BASE_URL,
+                settings.LLM_CHAT_API_KEY,
+                settings.LLM_EMBEDDING_MODEL,
                 values,
             )
             if len(vectors) == len(values):
                 record_model_usage(
                     tenant,
                     model_id="env-aliyun-bailian-embedding",
-                    model_name=settings.ALIYUN_BAILIAN_EMBEDDING_MODEL,
+                    model_name=settings.LLM_EMBEDDING_MODEL,
                     model_type="embedding",
                     provider="aliyun-bailian",
                     scenario="embedding",
@@ -492,7 +516,7 @@ def embedding(tenant: Tenant, texts: Iterable[str], model_id: str = "") -> list[
             record_model_usage(
                 tenant,
                 model_id="env-aliyun-bailian-embedding",
-                model_name=settings.ALIYUN_BAILIAN_EMBEDDING_MODEL,
+                model_name=settings.LLM_EMBEDDING_MODEL,
                 model_type="embedding",
                 provider="aliyun-bailian",
                 scenario="embedding",
@@ -647,8 +671,8 @@ def transcribe_audio(file_name: str, data: bytes, tenant: Tenant | None = None) 
     if not data or not cfg["enabled"] or not cfg["configured"]:
         return ""
     headers = {}
-    if settings.DASHSCOPE_API_KEY:
-        headers["Authorization"] = f"Bearer {settings.DASHSCOPE_API_KEY}"
+    if settings.LLM_CHAT_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.LLM_CHAT_API_KEY}"
     started = time.monotonic()
     try:
         resp = requests.post(
@@ -714,8 +738,8 @@ def extract_metadata(text: str, tenant: Tenant | None = None) -> dict:
 
 def _json_headers():
     headers = {"Content-Type": "application/json"}
-    if settings.DASHSCOPE_API_KEY:
-        headers["Authorization"] = f"Bearer {settings.DASHSCOPE_API_KEY}"
+    if settings.LLM_CHAT_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.LLM_CHAT_API_KEY}"
     return headers
 
 

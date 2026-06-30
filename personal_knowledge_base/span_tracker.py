@@ -13,6 +13,7 @@ from datetime import timezone as tz
 
 from django.utils import timezone
 
+from .db_utils import retry_on_locked
 from .models import Knowledge, KnowledgeProcessingSpan
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class SpanTracker:
             self._knowledge = Knowledge.objects.filter(id=self.knowledge_id).first()
         return self._knowledge
 
+    @retry_on_locked()
     def open_attempt(self, attempt: int = 1) -> KnowledgeProcessingSpan | None:
         """创建根 Span（新的解析尝试）。"""
         if not self.knowledge:
@@ -61,6 +63,7 @@ class SpanTracker:
             logger.exception("Failed to open attempt span")
             return None
 
+    @retry_on_locked()
     def begin_stage(self, stage_name: str, attempt: int = 1, input_data: dict = None) -> KnowledgeProcessingSpan | None:
         """开始一个阶段 Span。"""
         if not self.knowledge:

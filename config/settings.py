@@ -98,6 +98,7 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
         "OPTIONS": {
             "timeout": 30,  # 等待锁的超时时间（秒）
+            "init_command": "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=30000; PRAGMA synchronous=NORMAL;",
         },
     }
 }
@@ -132,24 +133,99 @@ REST_FRAMEWORK = {
     "UNAUTHENTICATED_USER": None,
 }
 
+def env_with_fallback(new_key: str, old_key: str, default: str = "") -> str:
+    """优先读取新变量名，回退到旧变量名（向后兼容）。"""
+    return os.environ.get(new_key) or os.environ.get(old_key, default)
+
+
+def _resolve_model_config(model_type: str, default_model: str, default_base_url: str, default_api_key: str = "") -> dict:
+    """
+    解析单个模型的配置，支持独立的 API Key 和 Base URL。
+    优先级：模型专用配置 > 通用 LLM_* 配置 > 旧 ALIYUN_BAILIAN_* 配置
+    """
+    # 模型专用配置（如 LLM_CHAT_API_KEY, LLM_EMBEDDING_BASE_URL）
+    api_key = os.environ.get(f"LLM_{model_type}_API_KEY") or os.environ.get("LLM_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", default_api_key)
+    base_url = os.environ.get(f"LLM_{model_type}_BASE_URL") or os.environ.get("LLM_BASE_URL") or os.environ.get("ALIYUN_BAILIAN_BASE_URL", default_base_url)
+    model = os.environ.get(f"LLM_{model_type}_MODEL") or os.environ.get(f"ALIYUN_BAILIAN_{model_type}_MODEL", default_model)
+
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": model,
+    }
+
+
+# ── LLM 配置（每个模型独立配置，支持不同提供商）────────────────────
+_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 对话模型
+LLM_CHAT_CONFIG = _resolve_model_config("CHAT", "qwen3.6-flash", _DEFAULT_BASE_URL)
+LLM_CHAT_API_KEY = LLM_CHAT_CONFIG["api_key"]
+LLM_CHAT_BASE_URL = LLM_CHAT_CONFIG["base_url"]
+LLM_CHAT_MODEL = LLM_CHAT_CONFIG["model"]
+
+# 摘要模型（默认与对话模型相同）
+LLM_SUMMARY_MODEL = os.environ.get("LLM_SUMMARY_MODEL") or LLM_CHAT_MODEL
+
+# 标题模型
+LLM_TITLE_MODEL = os.environ.get("LLM_TITLE_MODEL") or LLM_CHAT_MODEL
+
+# 问题生成模型
+LLM_QUESTION_MODEL = os.environ.get("LLM_QUESTION_MODEL") or LLM_CHAT_MODEL
+
+# 抽取模型
+LLM_EXTRACT_MODEL = os.environ.get("LLM_EXTRACT_MODEL") or LLM_CHAT_MODEL
+
+# Embedding 模型（可独立配置）
+LLM_EMBEDDING_CONFIG = _resolve_model_config("EMBEDDING", "text-embedding-v4", _DEFAULT_BASE_URL)
+LLM_EMBEDDING_API_KEY = LLM_EMBEDDING_CONFIG["api_key"]
+LLM_EMBEDDING_BASE_URL = LLM_EMBEDDING_CONFIG["base_url"]
+LLM_EMBEDDING_MODEL = LLM_EMBEDDING_CONFIG["model"]
+LLM_EMBEDDING_DIM = int(os.environ.get("LLM_EMBEDDING_DIM") or os.environ.get("ALIYUN_BAILIAN_EMBEDDING_DIM", "1024"))
+
+# Rerank 模型（可独立配置）
+LLM_RERANK_CONFIG = _resolve_model_config("RERANK", "qwen3-rerank", _DEFAULT_BASE_URL)
+LLM_RERANK_API_KEY = LLM_RERANK_CONFIG["api_key"]
+LLM_RERANK_BASE_URL = LLM_RERANK_CONFIG["base_url"]
+LLM_RERANK_MODEL = LLM_RERANK_CONFIG["model"]
+
+# VLM 视觉模型（可独立配置）
+LLM_VLM_CONFIG = _resolve_model_config("VLM", "qwen-vl-plus", _DEFAULT_BASE_URL)
+LLM_VLM_API_KEY = LLM_VLM_CONFIG["api_key"]
+LLM_VLM_BASE_URL = LLM_VLM_CONFIG["base_url"]
+LLM_VLM_MODEL = LLM_VLM_CONFIG["model"]
+
+# ASR 语音识别模型（可独立配置）
+LLM_ASR_CONFIG = _resolve_model_config("ASR", "paraformer-v2", _DEFAULT_BASE_URL)
+LLM_ASR_API_KEY = LLM_ASR_CONFIG["api_key"]
+LLM_ASR_BASE_URL = LLM_ASR_CONFIG["base_url"]
+LLM_ASR_MODEL = LLM_ASR_CONFIG["model"]
+LLM_ASR_URL = os.environ.get("LLM_ASR_URL") or f"{LLM_ASR_BASE_URL.rstrip('/')}/audio/transcriptions"
+
+# 向后兼容旧变量名
+DASHSCOPE_API_KEY = LLM_CHAT_API_KEY
+ALIYUN_BAILIAN_BASE_URL = LLM_CHAT_BASE_URL
+ALIYUN_BAILIAN_CHAT_MODEL = LLM_CHAT_MODEL
+ALIYUN_BAILIAN_SUMMARY_MODEL = LLM_SUMMARY_MODEL
+ALIYUN_BAILIAN_TITLE_MODEL = LLM_TITLE_MODEL
+ALIYUN_BAILIAN_QUESTION_MODEL = LLM_QUESTION_MODEL
+ALIYUN_BAILIAN_EXTRACT_MODEL = LLM_EXTRACT_MODEL
+ALIYUN_BAILIAN_EMBEDDING_MODEL = LLM_EMBEDDING_MODEL
+ALIYUN_BAILIAN_EMBEDDING_DIM = LLM_EMBEDDING_DIM
+ALIYUN_BAILIAN_RERANK_MODEL = LLM_RERANK_MODEL
+ALIYUN_BAILIAN_VLM_MODEL = LLM_VLM_MODEL
+ALIYUN_BAILIAN_ASR_MODEL = LLM_ASR_MODEL
+ALIYUN_BAILIAN_ASR_URL = LLM_ASR_URL
+# 通用别名
+LLM_API_KEY = LLM_CHAT_API_KEY
+LLM_BASE_URL = LLM_CHAT_BASE_URL
+
+# ── 其他配置 ─────────────────────────────────────────────────────
 WEKNORA_EMBEDDING_DIM = int(os.environ.get("WEKNORA_EMBEDDING_DIM", "384"))
 WEKNORA_TASK_WORKERS = 4
 WEKNORA_TASKS_SYNC = "test" in sys.argv
 WEKNORA_CHAT_MODEL_TIMEOUT = int(os.environ.get("WEKNORA_CHAT_MODEL_TIMEOUT", "60"))
-ALIYUN_BAILIAN_BASE_URL = os.environ.get("ALIYUN_BAILIAN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 
-ALIYUN_BAILIAN_CHAT_MODEL = os.environ.get("ALIYUN_BAILIAN_CHAT_MODEL", "qwen3.6-flash")
-ALIYUN_BAILIAN_SUMMARY_MODEL = os.environ.get("ALIYUN_BAILIAN_SUMMARY_MODEL", "qwen3.6-flash")
-ALIYUN_BAILIAN_TITLE_MODEL = os.environ.get("ALIYUN_BAILIAN_TITLE_MODEL", "qwen3.6-flash")
-ALIYUN_BAILIAN_QUESTION_MODEL = os.environ.get("ALIYUN_BAILIAN_QUESTION_MODEL", "qwen3.6-flash")
-ALIYUN_BAILIAN_EXTRACT_MODEL = os.environ.get("ALIYUN_BAILIAN_EXTRACT_MODEL", "qwen3.6-flash")
-ALIYUN_BAILIAN_EMBEDDING_MODEL = os.environ.get("ALIYUN_BAILIAN_EMBEDDING_MODEL", "text-embedding-v4")
-ALIYUN_BAILIAN_EMBEDDING_DIM = int(os.environ.get("ALIYUN_BAILIAN_EMBEDDING_DIM", "1024"))
-ALIYUN_BAILIAN_RERANK_MODEL = os.environ.get("ALIYUN_BAILIAN_RERANK_MODEL", "qwen3-rerank")
-ALIYUN_BAILIAN_VLM_MODEL = os.environ.get("ALIYUN_BAILIAN_VLM_MODEL", "qwen-vl-plus")
-ALIYUN_BAILIAN_ASR_MODEL = os.environ.get("ALIYUN_BAILIAN_ASR_MODEL", "paraformer-v2")
-ALIYUN_BAILIAN_ASR_URL = os.environ.get("ALIYUN_BAILIAN_ASR_URL", f"{ALIYUN_BAILIAN_BASE_URL.rstrip('/')}/audio/transcriptions")
 NEO4J_ENABLE = env_bool("NEO4J_ENABLE", False)
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME", "neo4j")

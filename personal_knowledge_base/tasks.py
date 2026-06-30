@@ -107,6 +107,8 @@ def _run_task(task_id: str, fn):
     record.status = "failed"
     record.error_message = str(last_exc)
     record.save(update_fields=["status", "error_message", "updated_at"])
+    # 关闭连接以释放锁
+    close_old_connections()
     cache.set(f"task:{task_id}", {"status": "failed", "progress": record.progress, "error_message": str(last_exc)}, timeout=86400)
     close_old_connections()
 

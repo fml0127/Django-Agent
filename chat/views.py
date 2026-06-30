@@ -422,21 +422,29 @@ SYSTEM_PROMPT_DEFAULT = (
 
 def _save_session_after_chat(session, data, kb_ids, query, tenant):
     """保存 session 配置和标题（对话完成后调用）。"""
-    state = session_state_from_payload(data, session.agent_config)
-    state.update({
-        "query": query,
-        "knowledge_base_ids": kb_ids,
-        "knowledge_ids": data.get("knowledge_ids") or [],
-    })
-    session.agent_config = state
-    if data.get("agent_id"):
-        session.agent_id = data.get("agent_id")
-    if session.title in {"", "新的对话"}:
+    try:
+        state = session_state_from_payload(data, session.agent_config)
+        state.update({
+            "query": query,
+            "knowledge_base_ids": kb_ids,
+            "knowledge_ids": data.get("knowledge_ids") or [],
+        })
+        session.agent_config = state
+        if data.get("agent_id"):
+            session.agent_id = data.get("agent_id")
+        if session.title in {"", "新的对话"}:
+            try:
+                session.title = role_completion("title", f"请为下面这次知识库对话生成一个 20 字以内的中文标题，只输出标题。\n\n{query}", query, 40)[:80] or session.title
+            except Exception:
+                pass
+        session.save(update_fields=["agent_config", "agent_id", "title", "updated_at"])
+    finally:
+        # 关闭数据库连接以释放锁
+        from django.db import connection
         try:
-            session.title = role_completion("title", f"请为下面这次知识库对话生成一个 20 字以内的中文标题，只输出标题。\n\n{query}", query, 40)[:80] or session.title
+            connection.close()
         except Exception:
             pass
-    session.save(update_fields=["agent_config", "agent_id", "title", "updated_at"])
 
 
 # ── Agent generation (background thread) ─────────────────────────────────
@@ -538,6 +546,13 @@ def _run_agent_generation(
                 is_completed=True,
                 updated_at=timezone.now(),
             )
+        except Exception:
+            pass
+    finally:
+        # 关闭数据库连接以释放锁
+        from django.db import connection
+        try:
+            connection.close()
         except Exception:
             pass
 
@@ -689,6 +704,12 @@ def chat_endpoint(request, session_id, agent=False):
     else:
         user_prompt = f"{kb_names_str}\n\n<user_question>\n{query}\n</user_question>" if kb_names_str else query
 
+    # 保存 RAG 增强后的用户消息到 rendered_content（参考 WeKnora）
+    # 后续轮次回放时使用增强版本，保留检索上下文
+    if user_prompt != query:
+        user_msg.rendered_content = user_prompt
+        user_msg.save(update_fields=["rendered_content", "updated_at"])
+
     # ── Stage 5: 生成回答（Agent 模式 vs 普通模式）─────────────────
     agent_steps_data = []
     agent_duration_ms = 0
@@ -718,6 +739,7 @@ def chat_endpoint(request, session_id, agent=False):
         )
 
         # 构建历史对话（最近 5 轮）
+        # 参考 WeKnora：优先使用 rendered_content（RAG 增强版本）
         history_msgs = []
         # 排除当前用户消息（已创建但尚未有 assistant 回复）
         recent_messages = Message.objects.filter(
@@ -725,7 +747,11 @@ def chat_endpoint(request, session_id, agent=False):
         ).exclude(id=user_msg.id).order_by("-created_at")[:10]
         for msg in reversed(list(recent_messages)):
             if msg.role in ("user", "assistant") and msg.content:
-                history_msgs.append({"role": msg.role, "content": msg.content})
+                # 用户消息优先使用 rendered_content（包含检索上下文）
+                if msg.role == "user" and msg.rendered_content:
+                    history_msgs.append({"role": msg.role, "content": msg.rendered_content})
+                else:
+                    history_msgs.append({"role": msg.role, "content": msg.content})
 
         # 构建知识库上下文（知识库信息 + 文档头 + chunk 内容）注入 Agent
         agent_context = ""
@@ -906,6 +932,10 @@ def chat_endpoint(request, session_id, agent=False):
                         args=(tenant, str(user.id), str(session.id), query, collected),
                         daemon=True,
                     ).start()
+
+                # 索引到 ChatHistoryKB（异步）
+                from personal_knowledge_base.chat_history_kb import index_message_to_kb_async
+                index_message_to_kb_async(tenant, assistant)
 
                 # 发送完成事件
                 yield f"event: message\ndata: {json.dumps({'response_type': 'answer', 'assistant_message_id': assistant.id, 'content': collected, 'done': True, 'knowledge_references': refs}, ensure_ascii=False)}\n\n"
