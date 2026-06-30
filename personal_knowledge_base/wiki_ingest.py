@@ -459,6 +459,12 @@ def reduce_summary(kb: KnowledgeBase, update: SlugUpdate, related_slugs: list[st
 
 
 def reduce_page(kb: KnowledgeBase, slug: str, updates: list[SlugUpdate]) -> WikiPage | None:
+    """
+    合并页面更新。
+    参考 WeKnora 的 reduce_page：使用 LLM 生成/合并页面内容。
+    """
+    from .wiki_page_generator import generate_page_content, merge_page_content, inject_cross_links
+
     page = WikiPage.objects.filter(knowledge_base=kb, slug=slug).first()
     retract_ids = {update.knowledge.id for update in updates if update.action == "retract" and update.knowledge}
     additions = [update for update in updates if update.action == "upsert" and update.knowledge]
@@ -543,7 +549,44 @@ def reduce_page(kb: KnowledgeBase, slug: str, updates: list[SlugUpdate]) -> Wiki
             "updated_at",
         ]
     )
-    content, _ = render_page_content(page.title, page.page_type, contributions)
+
+    # 使用 LLM 生成/合并页面内容（参考 WeKnora）
+    content = ""
+    if additions:
+        first_add_knowledge = additions[0].knowledge
+        if first_add_knowledge:
+            # 获取所有相关 chunks
+            all_chunk_ids = []
+            for contribution in contributions.values():
+                all_chunk_ids.extend(contribution.get("chunks") or [])
+            chunks = list(Chunk.objects.filter(id__in=unique_strings(all_chunk_ids), deleted_at__isnull=True))
+
+            if page.content and page.version and page.version > 1:
+                # 增量合并：已有页面 + 新信息
+                new_chunks = []
+                for update in additions:
+                    if update.chunk_ids:
+                        new_chunks.extend(Chunk.objects.filter(id__in=update.chunk_ids, deleted_at__isnull=True))
+                merged = merge_page_content(page, first_add_knowledge, new_chunks)
+                content = merged.content
+                if merged.summary:
+                    page.summary = merged.summary
+            else:
+                # 新页面：使用 LLM 生成
+                generated = generate_page_content(page.title, page.page_type, first_add_knowledge, chunks)
+                content = generated.content
+                if generated.summary:
+                    page.summary = generated.summary
+                page.chunk_refs = unique_strings(generated.referenced_chunks or chunk_ids)
+
+    if not content:
+        # 回退到模板拼接
+        content, _ = render_page_content(page.title, page.page_type, contributions)
+
+    # 注入交叉链接
+    all_pages = list(WikiPage.objects.filter(knowledge_base=kb, status="published"))
+    content = inject_cross_links(content, all_pages, page.slug)
+
     update_page_links(page, content)
     return page
 
