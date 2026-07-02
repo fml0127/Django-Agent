@@ -695,7 +695,8 @@ def kb_copy(request):
 def kb_move_targets(request, kb_id):
     _, tenant = auth_context(request)
     source = get_object_or_404(KnowledgeBase, id=kb_id)
-    qs = KnowledgeBase.objects.filter(tenant=tenant, type=source.type, deleted_at__isnull=True).exclude(id=kb_id)
+    # 参考 WeKnora：过滤系统内部知识库（is_temporary=True）
+    qs = KnowledgeBase.objects.filter(tenant=tenant, type=source.type, deleted_at__isnull=True, is_temporary=False).exclude(id=kb_id)
     return ok({"items": [kb_dict(kb) for kb in qs]})
 
 
@@ -1599,7 +1600,8 @@ def chat_endpoint(request, session_id, agent=False):
         is_completed=True,
         channel=data.get("channel", "web"),
     )
-    kb_ids = data.get("knowledge_base_ids") or ([session.knowledge_base_id] if session.knowledge_base_id else list(KnowledgeBase.objects.filter(tenant=tenant, deleted_at__isnull=True).values_list("id", flat=True)))
+    # 参考 WeKnora：过滤系统内部知识库（is_temporary=True），避免 __chat_history__ 暴露给用户
+    kb_ids = data.get("knowledge_base_ids") or ([session.knowledge_base_id] if session.knowledge_base_id else list(KnowledgeBase.objects.filter(tenant=tenant, deleted_at__isnull=True, is_temporary=False).values_list("id", flat=True)))
 
     # ── Stage 1 + Stage 3: 并行执行查询理解 + 记忆检索 ──────────────
     # 参考 WeKnora 的并行管道设计，两个 LLM 调用互不依赖，可并行执行

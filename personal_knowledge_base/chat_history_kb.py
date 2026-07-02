@@ -53,13 +53,13 @@ def get_or_create_chat_history_kb(tenant) -> Optional[str]:
         if kb:
             return kb_id
 
-    # 创建新的 ChatHistoryKB
+    # 创建新的 ChatHistoryKB（参考 WeKnora：标记为系统内部知识库，不在前端显示）
     kb = KnowledgeBase.objects.create(
         tenant=tenant,
         name="__chat_history__",
-        description="System-managed knowledge base for chat history indexing",
+        description="Auto-managed knowledge base for chat history message indexing",
         type="document",
-        is_temporary=False,
+        is_temporary=True,  # ← 关键：标记为系统内部，参考 WeKnora 的 IsTemporary: true
     )
 
     # 更新配置

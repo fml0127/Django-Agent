@@ -58,6 +58,7 @@ neo4j-data/
 docker-compose.override.yml
 
 # ── Testing ────────────────────────────────────────────────────────
+tests/
 .pytest_cache/
 .coverage
 htmlcov/

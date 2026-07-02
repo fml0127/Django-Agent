@@ -194,7 +194,8 @@ class AgentEngine:
         from .models import KnowledgeBase
         kb_ids = self.config.get("knowledge_base_ids", [])
         if not kb_ids:
-            kb_ids = list(KnowledgeBase.objects.filter(tenant=self.tenant, deleted_at__isnull=True).values_list("id", flat=True))
+            # 参考 WeKnora：过滤系统内部知识库（is_temporary=True），避免 __chat_history__ 暴露给用户
+            kb_ids = list(KnowledgeBase.objects.filter(tenant=self.tenant, deleted_at__isnull=True, is_temporary=False).values_list("id", flat=True))
         return {"tenant_id": self.tenant.id, "kb_ids": kb_ids, "session_id": self.session_id, "user_id": self.user_id}
 
     def _call_llm_with_tools(self, messages: list[dict], max_retries: int = 3) -> dict:
